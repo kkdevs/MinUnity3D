@@ -99,7 +99,7 @@
 			this.Name = "Form1";
 			this.ShowIcon = false;
 			this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-			this.Text = "Form1";
+			this.Text = "Min.Unity3D";
 			this.TopMost = true;
 			this.ResumeLayout(false);
 

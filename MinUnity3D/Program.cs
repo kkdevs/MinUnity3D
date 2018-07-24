@@ -34,83 +34,97 @@ static class Program
 
 		ui = new Form1();
 		ui.Show();
+		long pending = 0;
+		bool closing = false;
 		ui.Shown += (o,e) => {
+			long compressed = 0;
+			long processed = 0;
 			ui.TopMost = false;
-			new Thread(processFiles).Start();
+			long nfiles = 0;
+			long done = 0;
+			foreach (var f in Directory.GetFiles(path, "*.unity3d", SearchOption.AllDirectories))
+			{
+				if (f.ToLower().Contains("\\sound\\"))
+					continue;
+				nfiles++;
+				pending++;
+				ThreadPool.QueueUserWorkItem((fo) =>
+				{
+					while (!closing)
+					{
+						lock (nblock)
+						{
+							if (nbufs < 1L * 1024 * 1024 * 1024)
+								break;
+						}
+						Thread.Sleep(5000);
+					}
+					var fn = fo as string;
+					if (!closing)
+					{
+						long res = -1;
+						var fno = fn + ".comp";
+						long outlen;
+						long inlen = new FileInfo(fn).Length;
+						lock (nblock)
+						{
+							nbufs += inlen;
+						}
+						using (var fin = File.Open(f, FileMode.Open))
+						using (var fout = File.Create(fno))
+						{
+							res = Repack(fin, fout);
+							outlen = fout.Position;
+						}
+
+						if (res != -1)
+							File.Replace(fno, f, null);
+						else
+							File.Delete(fno);
+						lock (nblock)
+						{
+							nbufs -= inlen;
+						}
+
+						ui.Invoke(new MethodInvoker(delegate ()
+						{
+							processed += res;
+							compressed += outlen;
+							done++;
+							double GB = 1024 * 1024 * 1024;
+							ui.textProgress.Text = $"{done} of {nfiles}, {done * 100.0 / nfiles:0.00}% done";
+							ui.textRatio.Text = $"{processed / GB:0.00}GB => {compressed / GB:0.00}GB, {compressed * 100.0 / processed:0.00}% ratio";
+							ui.progressFile.Value = Math.Min((int)(done  * 100 / nfiles), 100);
+							ui.progressRatio.Value = Math.Min((int)(compressed * 100 / processed), 100);
+							ui.log.AppendText($"{f} {(outlen * 100.0 / res):0.00}%\n");
+							if (closing)
+								ui.log.AppendText($"*** terminating, {pending} jobs remaining\n");
+						}));
+					}
+					
+					ui.Invoke(new MethodInvoker(delegate ()
+					{
+						if (--pending == 0)
+						{
+							if (closing)
+								ui.Close();
+							else
+								ui.log.AppendText("All done.");
+						}
+							
+					}));
+				}, f);
+			}
 		};
 		ui.FormClosing += (o, e) =>
 		{
 			closing = true;
-			if (processing)
+			if (pending > 0)
 				e.Cancel = true;
 		};
 
 		Application.Run(ui);
 	}
-	public static bool processing;
-	public static bool closing;
-
-	public static void processFiles()
-	{
-		processing = true;
-		var allfiles = Directory.GetFiles(path, "*.unity3d", SearchOption.AllDirectories);
-		var total = allfiles.Sum(x => new FileInfo(x).Length) + 1;
-
-		var chunk = allfiles.Length / Environment.ProcessorCount;
-		if (chunk == 0)
-			chunk++;
-		long processed = 1;
-		long compressed = 1;
-		List<Thread> threads = new List<Thread>();
-		while (allfiles != null)
-		{
-			var part = allfiles;
-			if (part.Length > chunk)
-			{
-				part = part.Take(chunk).ToArray();
-				allfiles = allfiles.Skip(chunk).ToArray();
-			} else
-			{
-				allfiles = null;
-			}
-			threads.Add(new Thread(() =>
-			{
-				foreach (var f in part)
-				{
-					if (closing)
-						break;
-					var res = false;
-					var fno = f + ".comp";
-					long outlen, inlen;
-					using (var fin = File.Open(f, FileMode.Open))
-					using (var fout = File.Create(fno))
-					{
-						res = Repack(fin, fout);
-						inlen = fin.Seek(0, SeekOrigin.End);
-						outlen = fout.Position;
-					}
-					ui.Invoke(new MethodInvoker(delegate ()
-					{
-						processed += inlen;
-						compressed += outlen;
-						double GB = 1024 * 1024 * 1024;
-						ui.textProgress.Text = $"{processed / GB:0.00}GB of {total / GB:0.00}GB, {processed * 100.0 / total:0.00}% done";
-						ui.textRatio.Text = $"{processed / GB:0.00}GB => {compressed / GB:0.00}GB, {compressed * 100.0 / processed:0.00}% ratio";
-						ui.progressFile.Value = Math.Min((int)(processed * 100 / total), 100);
-						ui.progressRatio.Value = Math.Min((int)(compressed * 100 / processed), 100);
-						ui.log.AppendText($"{f} {(outlen * 100 / inlen):0.00}%\n");
-					}));
-
-					//if (res)
-					//	File.Replace(fno, f, null);
-				}
-			}));
-			threads.Last().Start();
-		}
-		foreach (var t in threads)
-			t.Join();
-	}
-
 
 	public static uint bswap(uint x)
 	{
@@ -142,9 +156,11 @@ static class Program
 	public static int GetInt(this BinaryReader r) => (int)bswap(r.ReadUInt32());
 	public static short GetShort(this BinaryReader r) => (short)(bswap(r.ReadUInt16()) >> 16);
 	public static long GetLong(this BinaryReader r) => (long)bswap(r.ReadUInt64());
-
-	public static bool Repack(Stream input, Stream output, bool randomize = false, int lz4blockSize = 128 * 1024)
+	public static long nbufs;
+	public static object nblock = new object();
+	public static long Repack(Stream input, Stream output, bool randomize = false, int lz4blockSize = 128 * 1024)
 	{
+		long unsize = 0;
 		const int minRatio = 95;
 		var baseStart = output.Position;
 		var r = new BinaryReader(input, Encoding.ASCII);
@@ -152,12 +168,12 @@ static class Program
 
 		var format = r.GetString();
 		if (format != "UnityFS")
-			return false;
+			return -1;
 		w.Put(format);
 
 		var gen = r.GetInt();
 		if (gen != 6)
-			return false;
+			return -1;
 		w.Put(gen);
 
 		w.Put(r.GetString());
@@ -170,6 +186,7 @@ static class Program
 		var bundleSize = r.GetLong();
 		var metaCompressed = r.GetInt();
 		var metaUncompressed = r.GetInt();
+		unsize += metaUncompressed;
 		var flags = r.GetInt();
 		w.Put(0x43);
 		var dataPos = r.BaseStream.Position;
@@ -190,7 +207,7 @@ static class Program
 				metabuf = r.ReadBytes(metaUncompressed);
 				break;
 			default:
-				return false;
+				return -1;
 		}
 
 		r.BaseStream.Position = dataPos;
@@ -207,6 +224,7 @@ static class Program
 			var compSize = meta.GetInt();
 			var blockFlags = meta.GetShort();
 			var block = r.ReadBytes(compSize);
+			unsize += origSize;
 			if (blockFlags == 0x40 || blockFlags == 2 || blockFlags == 3)
 			{
 				if (blockFlags != 0x40)
@@ -214,8 +232,16 @@ static class Program
 				for (int pos = 0; pos < block.Length; pos += lz4blockSize)
 				{
 					var orig = Math.Min(lz4blockSize, block.Length - pos);
-					var newblock = LZ4Codec.EncodeHC(block, pos, orig);
-					blockFlags = (short)3;
+					byte[] newblock;
+					try
+					{
+						newblock = LZ4Codec.EncodeHC(block, pos, orig);
+						blockFlags = (short)3;
+					} catch
+					{
+						newblock = LZ4Codec.Encode(block, pos, orig);
+						blockFlags = (short)2;
+					}
 					if (newblock.Length * 100 > orig * minRatio)
 					{
 						newblock = new byte[orig];
@@ -254,7 +280,9 @@ static class Program
 		var newmetabufc = LZ4Codec.EncodeHC(newmetabuf, 0, newmetabuf.Length);
 		w.Write(newmetabufc);
 		foreach (var buf in pending)
+		{
 			w.Write(buf);
+		}
 		var endpos = w.BaseStream.Position;
 		var bundlesize = endpos - baseStart;
 		w.BaseStream.Position = infoPos;
@@ -262,6 +290,6 @@ static class Program
 		w.Put(newmetabufc.Length);
 		w.Put(newmetabuf.Length);
 		output.Position = endpos;
-		return true;
+		return unsize;
 	}
 }

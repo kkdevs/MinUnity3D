@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.27428.2043
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MinUnity3D", "MinUnity3D\MinUnity3D.csproj", "{6B5D1B5F-0145-4870-BACD-754060B3D275}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6B5D1B5F-0145-4870-BACD-754060B3D275}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B5D1B5F-0145-4870-BACD-754060B3D275}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B5D1B5F-0145-4870-BACD-754060B3D275}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B5D1B5F-0145-4870-BACD-754060B3D275}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {865DFF03-EAA4-43E6-919F-D5AB7C40360E}
+	EndGlobalSection
+EndGlobal
