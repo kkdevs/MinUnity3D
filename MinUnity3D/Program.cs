@@ -77,10 +77,12 @@ static class Program
 							outlen = fout.Position;
 						}
 
+#if true
 						if (res != -1)
 							File.Replace(fno, f, null);
 						else
 							File.Delete(fno);
+#endif
 						lock (nblock)
 						{
 							nbufs -= inlen;
@@ -217,44 +219,63 @@ static class Program
 		meta.BaseStream.Position += 16;
 		int nblocks = meta.GetInt();
 		List<byte[]> pending = new List<byte[]>();
+		var tbuf = new byte[0];
+		int tbufptr = 0;
 		for (var i = 0; i < nblocks; i++)
 		{
 			Console.WriteLine(i);
 			var origSize = meta.GetInt();
 			var compSize = meta.GetInt();
-			var blockFlags = meta.GetShort();
+			var blockFlags = meta.GetShort() & 0x3f;
 			var block = r.ReadBytes(compSize);
 			unsize += origSize;
-			if (blockFlags == 0x40 || blockFlags == 2 || blockFlags == 3)
+			bool flush = false;
+			if (blockFlags == 0 || blockFlags == 2 || blockFlags == 3)
 			{
-				if (blockFlags != 0x40)
-					block = LZ4Codec.Decode(block, 0, compSize, origSize);
-				for (int pos = 0; pos < block.Length; pos += lz4blockSize)
+				if (tbuf.Length < tbufptr + origSize)
+					Array.Resize(ref tbuf, tbufptr + origSize);
+				if (blockFlags != 0)
 				{
-					var orig = Math.Min(lz4blockSize, block.Length - pos);
+					LZ4Codec.Decode(block, 0, compSize, tbuf, tbufptr, origSize);
+				}
+				else
+				{
+					Buffer.BlockCopy(block, 0, tbuf, tbufptr, origSize);
+				}
+				tbufptr += origSize;
+				if ((i < nblocks - 1) && (tbufptr < lz4blockSize))
+					continue;
+			}
+			else flush = true;		
+			if (tbufptr > 0) { // full block, last block, or non-compressible encountered
+				for (int pos = 0; pos < tbufptr; pos += lz4blockSize)
+				{
+					var orig = Math.Min(lz4blockSize, tbufptr - pos);
 					byte[] newblock;
+					short nbf;
 					try
 					{
-						newblock = LZ4Codec.EncodeHC(block, pos, orig);
-						blockFlags = (short)3;
+						newblock = LZ4Codec.EncodeHC(tbuf, pos, orig);
+						nbf = (short)3;
 					} catch
 					{
-						newblock = LZ4Codec.Encode(block, pos, orig);
-						blockFlags = (short)2;
+						newblock = LZ4Codec.Encode(tbuf, pos, orig);
+						nbf = (short)3;
 					}
 					if (newblock.Length * 100 > orig * minRatio)
 					{
 						newblock = new byte[orig];
-						Array.Copy(block, pos, newblock, 0, orig);
-						blockFlags = 0x40;
+						Array.Copy(tbuf, pos, newblock, 0, orig);
+						nbf = 0;
 					}
 					newmeta.Put(orig);
 					newmeta.Put(newblock.Length); ;
-					newmeta.Put(blockFlags);
+					newmeta.Put(nbf);
 					pending.Add(newblock);
 				}
+				tbufptr = 0;
 			}
-			else
+			if (flush)
 			{
 				newmeta.Put(origSize);
 				newmeta.Put(compSize);
