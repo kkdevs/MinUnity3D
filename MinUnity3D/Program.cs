@@ -16,8 +16,19 @@ static class Program
 	[STAThread]
 	static void Main(string[] args)
 	{
+		bool silent = false;
+		bool doexit = false;
 		Application.EnableVisualStyles();
 		Application.SetCompatibleTextRenderingDefault(false);
+		while (args.Length > 0)
+		{
+			if (args[0] == "/silent")
+				silent = true;
+			else if (args[0] == "/exit")
+				doexit = true;
+			else break;
+			args = args.Skip(1).ToArray();
+		}
 
 		if (args.Length == 0)
 		{
@@ -33,10 +44,17 @@ static class Program
 			return;
 
 		ui = new Form1();
-		ui.Show();
+		if (!silent)
+		{
+			ui.Show();
+		} else
+		{
+			ui.WindowState = FormWindowState.Minimized;
+			ui.ShowInTaskbar = false;
+		}
 		long pending = 0;
 		bool closing = false;
-		ui.Shown += (o,e) => {
+		Action process = ()=> {
 			long compressed = 0;
 			long processed = 0;
 			ui.TopMost = false;
@@ -111,7 +129,11 @@ static class Program
 							if (closing)
 								ui.Close();
 							else
+							{
 								ui.log.AppendText("All done.");
+								if (silent || doexit)
+									Application.Exit();
+							}
 						}
 							
 					}));
@@ -124,6 +146,13 @@ static class Program
 			if (pending > 0)
 				e.Cancel = true;
 		};
+		if (!silent)
+			ui.Shown += (o, e) =>
+			{
+				process();
+			};
+		else
+			process();
 
 		Application.Run(ui);
 	}
