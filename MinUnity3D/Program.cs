@@ -16,6 +16,7 @@ static class Program
 	[STAThread]
 	static void Main(string[] args)
 	{
+		bool randguid = false;
 		bool silent = false;
 		bool doexit = false;
 		Application.EnableVisualStyles();
@@ -26,6 +27,8 @@ static class Program
 				silent = true;
 			else if (args[0] == "/exit")
 				doexit = true;
+			else if (args[0] == "/randguid")
+				randguid = true;
 			else break;
 			args = args.Skip(1).ToArray();
 		}
@@ -91,7 +94,7 @@ static class Program
 						using (var fin = File.Open(f, FileMode.Open))
 						using (var fout = File.Create(fno))
 						{
-							res = Repack(fin, fout);
+							res = Repack(fin, fout, randguid);
 							outlen = fout.Position;
 						}
 
@@ -316,12 +319,19 @@ static class Program
 		//Console.WriteLine(pending.Count);
 		int nfiles = meta.GetInt();
 		newmeta.Put(nfiles);
+		var rng = new RNGCryptoServiceProvider();
 		for (int i = 0; i < nfiles; i++)
 		{
 			newmeta.Put(meta.GetLong());
 			newmeta.Put(meta.GetLong());
 			newmeta.Put(meta.GetInt());
 			var name = meta.GetString();
+			if (randomize)
+			{
+				var rnbuf = new byte[16];
+				rng.GetBytes(rnbuf);
+				name = "CAB-" + string.Concat(rnbuf.Select((x) => ((int)x).ToString("X2")).ToArray()).ToLower();
+			}
 			newmeta.Put(name);
 		}
 		newmeta.BaseStream.Position = 16;
