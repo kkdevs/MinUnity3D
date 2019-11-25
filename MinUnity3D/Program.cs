@@ -350,6 +350,8 @@ static class Program
 		w.Put(newmetabufc.Length);
 		w.Put(newmetabuf.Length);
 		output.Position = endpos;
+		meta.Close();
+		newmeta.Close();
 		return unsize;
 	}
 }
